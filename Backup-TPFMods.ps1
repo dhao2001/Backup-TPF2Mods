@@ -12,7 +12,7 @@ param (
 
 <#
     .DESCRIPTION
-    The Get-7ZipVersion function returns the version and architecture of 7z.exe execution,
+    The `Get-7ZipVersion` function returns the version and architecture of 7z.exe execution,
     which is given in SevenZipPath parameter.
 #>
 function Get-7ZipVersion {
@@ -31,7 +31,7 @@ function Get-7ZipVersion {
 
     $sevenZipMatch = $null
     try {
-        $sevenZipMatch = (& $SevenZipPath | Select-String -Pattern "7-Zip").Line -match '7-Zip (?<ver>\d+\.\d+) \((?<arch>\w+)\)'
+        $sevenZipMatch = (& $SevenZipPath | Select-String -Pattern "7-Zip").Line -match '7-Zip\s(?:\([az]\)\s)?(?<ver>\d+\.\d+)\s\((?<arch>\w+)\)'
     }
     catch [System.Management.Automation.CommandNotFoundException] {
         throw $_
