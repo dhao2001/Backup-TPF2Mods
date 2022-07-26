@@ -9,31 +9,39 @@ param (
     $Use7Zip
 )
 
-function get-7z-availability {
+
+<#
+    .DESCRIPTION
+    The Get-7ZipVersion function returns the version and architecture of 7z.exe execution,
+    which is given in SevenZipPath parameter.
+#>
+function Get-7ZipVersion {
     param (
         [Parameter()]
         [string]
-        $sevenZipPath
+        $SevenZipPath
     )
 
     $result = [PSCustomObject]@{
         Available = $false
-        Version = $null
         Architecture = $null
+        Path = $null
+        Version = $null
     }
 
     $sevenZipMatch = $null
     try {
-        $sevenZipMatch = (& $sevenZipPath | Select-String -Pattern "7-Zip").Line -match '7-Zip (?<ver>\d+\.\d+) \((?<arch>\w+)\)'
+        $sevenZipMatch = (& $SevenZipPath | Select-String -Pattern "7-Zip").Line -match '7-Zip (?<ver>\d+\.\d+) \((?<arch>\w+)\)'
     }
     catch [System.Management.Automation.CommandNotFoundException] {
         throw $_
     }
 
     if ($sevenZipMatch) {
-        $result.Version = $Matches.ver
-        $result.Architecture = $Matches.arch
         $result.Available = $true
+        $result.Architecture = $Matches.arch
+        $result.Path = $($(Get-Command $SevenZipPath).Path)
+        $result.Version = $Matches.ver
     }
     
     return $result
