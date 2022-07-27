@@ -111,8 +111,8 @@ function Get-System7ZipVersion {
     $search7zPath = $null
     if ($Platform -eq 'Windows') {
         $search7zPath = @(
-            Join-Path '.' '7za'
-            Join-Path '.' '7z'
+            Join-Path $PSScriptRoot '7za'
+            Join-Path $PSScriptRoot '7z'
             '7za'
             '7z'
             Join-Path $env:ProgramFiles '7-Zip' '7z'
@@ -121,8 +121,8 @@ function Get-System7ZipVersion {
     }
     elseif ($Platform -eq 'Unix') {
         $search7zPath = @(
-            Join-Path '.' '7zz'
-            Join-Path '.' '7z'
+            Join-Path $PSScriptRoot '7zz'
+            Join-Path $PSScriptRoot '7z'
             '7zz'
             '7z'
             "/bin/7zz"
