@@ -56,10 +56,10 @@ function Get-7ZipVersion {
     )
 
     $result = [PSCustomObject]@{
-        Available = $false
+        Available    = $false
         Architecture = $null
-        Path = $null
-        Version = $null
+        Path         = $null
+        Version      = $null
     }
 
     $sevenZipMatch = $null
@@ -158,12 +158,72 @@ function Use-7Zip {
 }
 
 
-function New-7ZipArchive {
-    param (
-        
-    )
 
-    & $script:_7zipPath
+
+
+<#
+    .DESCRIPTION
+    This `Start-7ZipBackup` function creates a full backup of
+    mods installed at Steam Workshop.
+
+    .PARAMETER 7zPath
+    Path to 7-Zip executable.
+
+    .PARAMETER DestinationPath
+    Path to directory where backups of mods store.
+
+    .PARAMETER WorkshopModPath
+    Path to Steam Workshop items' directory of Transport Fever.
+    This path is similar to something like 
+    `<SteamLibrary>\steamapps\workshop\content\1066780`, which is 
+    the parent of ALL mods.
+#>
+function Start-7ZipBackup {
+    param (
+        # Specifies a path to one or more locations.
+        [Parameter(
+            Mandatory,
+            Position = 0
+        )]
+        [Alias('7z')]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $7zPath,
+
+        [Parameter(
+            Mandatory,
+            Position = 1
+        )]
+        [Alias('Destination')]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $DestinationPath,
+
+        [Parameter(
+            Mandatory,
+            Position = 2
+        )]
+        [Alias('WorkshopMod')]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $WorkshopModPath
+    )
+    
+    $curLocation = Get-Location
+
+    if ( -not (Test-Path -Path $DestinationPath)) {
+        New-Item -Path $DestinationPath -ItemType Directory
+    }
+    $destParent = Resolve-Path $DestinationPath
+
+    $modsParent = Resolve-Path $WorkshopModPath
+    Set-Location $modsParent
+
+    foreach ($mod in Get-ChildItem -Directory) {
+        & $7zPath 'a' $(Join-Path $destParent "$($mod.Name)_$("{0:yyyyMMdd-HHmmss}" -f $mod.LastWriteTime).7z") $($mod.Name)
+    }
+
+    Set-Location $curLocation
 }
 
 
