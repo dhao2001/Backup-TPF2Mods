@@ -168,6 +168,12 @@ function New-7ZipArchive {
 
 
 
+
+
+<#
+    .DESCRIPTION
+    Main Function Block
+#>
 function Backup-TPFMods {
     $platform = Get-Platform
     if (-not [string]::IsNullOrWhiteSpace($script:Use7Zip)) {
