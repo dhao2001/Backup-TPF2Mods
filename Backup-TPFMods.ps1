@@ -10,7 +10,11 @@ param (
 
     [Parameter()]
     [string]
-    $Use7Zip
+    $Use7Zip,
+
+    [Parameter()]
+    [switch]
+    $UseBuildInCompress = $false
 )
 
 
@@ -238,8 +242,75 @@ function Start-7ZipBackup {
     Set-Location $curLocation
 }
 
+<#
+    .DESCRIPTION
+    This `Start-CompressArchiveBackup` function creates a full 
+    backup of mods installed at Steam Workshop.
 
+    .PARAMETER DestinationPath
+    Path to directory where backups of mods store.
 
+    .PARAMETER WorkshopModPath
+    Path to Steam Workshop items' directory of Transport Fever.
+    This path is similar to something like 
+    `<SteamLibrary>\steamapps\workshop\content\1066780`, which is 
+    the parent of ALL mods.
+#>
+function Start-CompressArchiveBackup {
+    param (
+        [Parameter(
+            Mandatory,
+            Position = 0
+        )]
+        [Alias('Destination')]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $DestinationPath,
+
+        [Parameter(
+            Mandatory,
+            Position = 1
+        )]
+        [Alias('WorkshopMod')]
+        [ValidateNotNullOrEmpty()]
+        [string]
+        $WorkshopModPath
+    )
+    
+    $curLocation = Get-Location
+
+    if ( -not (Test-Path -Path $DestinationPath)) {
+        New-Item -Path $DestinationPath -ItemType Directory
+    }
+    $destParent = Resolve-Path $DestinationPath
+
+    $modsParent = Resolve-Path $WorkshopModPath
+    Set-Location $modsParent
+
+    $mods = Get-ChildItem -Directory
+    $progressBarCounter = 1
+    foreach ($mod in $mods) {
+        $lastWrite = $mod.LastWriteTime
+        $destPath = Join-Path $destParent "$($mod.Name)_$("{0:yyyyMMdd-HHmmss}" -f $lastWrite).zip"
+
+        $progress = @{
+            Activity         = "Creating Backup"
+            Status           = "`($($progressBarCounter)/$($mods.Length)`)"
+            CurrentOperation = "Backup $($mod.Name) -> $(Split-Path -Path $destPath -Leaf)"
+            PercentComplete  = $($($progressBarCounter) / $($mods.Length) * 100)
+        }
+        Write-Progress @progress
+
+        if (Test-Path $destPath) {
+            Write-Warning "There is already a backup for $($mod.Name) modified at $($lastWrite). Skipping."
+            continue
+        }
+
+        Compress-Archive -Path $mod.Name -DestinationPath $destPath -ErrorAction Stop
+        $progressBarCounter++
+    }
+    Set-Location $curLocation
+}
 
 
 <#
@@ -248,7 +319,10 @@ function Start-7ZipBackup {
 #>
 function Backup-TPFMods {
     $platform = Get-Platform
-    if (-not [string]::IsNullOrWhiteSpace($script:Use7Zip)) {
+    if ($script:UseBuildInCompress) {
+        # Do nothing
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($script:Use7Zip)) {
         $sevenZipVer = Get-7ZipVersion $script:Use7Zip
         if ($sevenZipVer -and $sevenZipVer.Available) {
             $script:_use7zip = $sevenZipVer
@@ -274,6 +348,14 @@ function Backup-TPFMods {
         }
 
         Start-7ZipBackup @szParam 
+    }
+    else {
+        $backupParam = @{
+            DestinationPath = $script:BackupPath
+            WorkshopModPath = $script:ModsPath
+        }
+
+        Start-CompressArchiveBackup @backupParam
     }
 }
 
