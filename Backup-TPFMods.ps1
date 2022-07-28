@@ -102,7 +102,7 @@ function Get-7ZipVersion {
 #>
 function Get-System7ZipVersion {
     param (
-        [Parameter()]
+        [Parameter(Mandatory)]
         [ValidateSet('Windows', 'Unix')]
         [string]
         $Platform
@@ -220,7 +220,20 @@ function Start-7ZipBackup {
     Set-Location $modsParent
 
     foreach ($mod in Get-ChildItem -Directory) {
-        & $7zPath 'a' $(Join-Path $destParent "$($mod.Name)_$("{0:yyyyMMdd-HHmmss}" -f $mod.LastWriteTime).7z") $($mod.Name)
+        $lastWrite = $mod.LastWriteTime
+        $destPath = Join-Path $destParent "$($mod.Name)_$("{0:yyyyMMdd-HHmmss}" -f $lastWrite).7z"
+        if (Test-Path $destPath) {
+            Write-Output "There is already a backup for $($mod.Name) modified at $($lastWrite). Skipping."
+            continue
+        }
+
+        $7zOutput = & $7zPath 'a' $destPath $($mod.Name)
+        if ($LASTEXITCODE -eq 0) {
+            Write-Output "Backup for $($mod.Name) modified at $($lastWrite) is created."
+        }
+        else {
+            throw "Error occured when creating backup for $($mod.Name) modified at $($lastWrite)`n7-Zip Output:`n$($7zOutput)"
+        }
     }
 
     Set-Location $curLocation
