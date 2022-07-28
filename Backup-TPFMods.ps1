@@ -6,6 +6,10 @@ param (
 
     [Parameter()]
     [string]
+    $BackupPath,
+
+    [Parameter()]
+    [string]
     $Use7Zip
 )
 
@@ -14,7 +18,6 @@ param (
     Script scope variable used.
 #>
 $script:_use7zip = $false
-$script:_7zipPath = $null
 
 
 
@@ -146,27 +149,10 @@ function Get-System7ZipVersion {
 
 <#
     .DESCRIPTION
-    The `Use-7Zip‘ funcion sets the 7z.exe execution's path and flag in script scope.
-#>
-function Use-7Zip {
-    param (
-        [string]$SevenZipPath
-    )
-
-    $script:_use7zip = $true
-    $script:_7zipPath = $SevenZipPath
-}
-
-
-
-
-
-<#
-    .DESCRIPTION
     This `Start-7ZipBackup` function creates a full backup of
     mods installed at Steam Workshop.
 
-    .PARAMETER 7zPath
+    .PARAMETER SevenZipPath
     Path to 7-Zip executable.
 
     .PARAMETER DestinationPath
@@ -188,7 +174,7 @@ function Start-7ZipBackup {
         [Alias('7z')]
         [ValidateNotNullOrEmpty()]
         [string]
-        $7zPath,
+        $SevenZipPath,
 
         [Parameter(
             Mandatory,
@@ -219,21 +205,34 @@ function Start-7ZipBackup {
     $modsParent = Resolve-Path $WorkshopModPath
     Set-Location $modsParent
 
-    foreach ($mod in Get-ChildItem -Directory) {
+    $mods = Get-ChildItem -Directory
+    $progressBarCounter = 1
+    foreach ($mod in $mods) {
         $lastWrite = $mod.LastWriteTime
         $destPath = Join-Path $destParent "$($mod.Name)_$("{0:yyyyMMdd-HHmmss}" -f $lastWrite).7z"
+
+        $progress = @{
+            Activity         = "Creating Backup"
+            Status           = "`($($progressBarCounter)/$($mods.Length)`)"
+            CurrentOperation = "Backup $($mod.Name) -> $(Split-Path -Path $destPath -Leaf)"
+            PercentComplete  = $($($progressBarCounter) / $($mods.Length) * 100)
+        }
+        Write-Progress @progress
+
         if (Test-Path $destPath) {
-            Write-Output "There is already a backup for $($mod.Name) modified at $($lastWrite). Skipping."
+            Write-Warning "There is already a backup for $($mod.Name) modified at $($lastWrite). Skipping."
             continue
         }
 
-        $7zOutput = & $7zPath 'a' $destPath $($mod.Name)
+        $szOutput = & $SevenZipPath a $destPath $($mod.Name)
         if ($LASTEXITCODE -eq 0) {
-            Write-Output "Backup for $($mod.Name) modified at $($lastWrite) is created."
+            # Write-Output "Backup for $($mod.Name) modified at $($lastWrite) is created."
         }
         else {
-            throw "Error occured when creating backup for $($mod.Name) modified at $($lastWrite)`n7-Zip Output:`n$($7zOutput)"
+            throw "Error occured when creating backup for $($mod.Name) modified at $($lastWrite)`n7-Zip Output:`n$($szOutput)"
         }
+
+        $progressBarCounter++
     }
 
     Set-Location $curLocation
@@ -250,16 +249,31 @@ function Start-7ZipBackup {
 function Backup-TPFMods {
     $platform = Get-Platform
     if (-not [string]::IsNullOrWhiteSpace($script:Use7Zip)) {
-        $7zver = Get-7ZipVersion $script:Use7Zip
-        if ($7zver -and $7zver.Available) {
-            Write-Output "Using User's 7-Zip $($7zver.Version) at $($7zver.Path)"
+        $sevenZipVer = Get-7ZipVersion $script:Use7Zip
+        if ($sevenZipVer -and $sevenZipVer.Available) {
+            $script:_use7zip = $sevenZipVer
+            Write-Output "Using User's 7-Zip $($sevenZipVer.Version) at $($sevenZipVer.Path)"
+        }
+        else {
+            throw "Invalid 7-Zip $($script:Use7Zip) was given."
         }
     }
-    elseif (($7zver = Get-System7ZipVersion $platform) -and $7zver.Available) {
-        Write-Output "Using System 7-Zip $($7zver.Version) at $($7zver.Path)"
+    elseif (($sevenZipVer = Get-System7ZipVersion $platform) -and $sevenZipVer.Available) {
+        $script:_use7zip = $sevenZipVer
+        Write-Output "Using System 7-Zip $($sevenZipVer.Version) at $($sevenZipVer.Path)"
     }
     else {
         Write-Output "No available 7-Zip"
+    }
+
+    if ($script:_use7zip) {
+        $szParam = @{
+            SevenZipPath    = $script:_use7zip.Path
+            DestinationPath = $script:BackupPath
+            WorkshopModPath = $script:ModsPath
+        }
+
+        Start-7ZipBackup @szParam 
     }
 }
 
