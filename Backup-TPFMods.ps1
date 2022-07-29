@@ -118,8 +118,8 @@ function Get-System7ZipVersion {
             Join-Path $PSScriptRoot '7z'
             '7za'
             '7z'
-            Join-Path $env:ProgramFiles '7-Zip' '7z'
-            Join-Path ${env:ProgramFiles(x86)} '7-Zip' '7z'
+            Join-Path $env:ProgramFiles -ChildPath '7-Zip' | Join-Path -ChildPath '7z'
+            Join-Path ${env:ProgramFiles(x86)} -ChildPath '7-Zip' | Join-Path -ChildPath '7z'
         )
     }
     elseif ($Platform -eq 'Unix') {
