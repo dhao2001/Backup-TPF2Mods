@@ -1,4 +1,4 @@
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'BuildinCompress')]
 param (
     [Parameter()]
     [string]
@@ -8,7 +8,11 @@ param (
     [string]
     $BackupPath,
 
-    [Parameter()]
+    [Parameter(ParameterSetName = 'BuildinCompress')]
+    [switch]
+    $UseBuildInCompress = $false,
+    
+    [Parameter(ParameterSetName = '7ZipCompress')]
     [string]
     $Use7Zip
 )
@@ -17,7 +21,7 @@ param (
 <#
     Script scope variable used.
 #>
-$script:_use7zip = $false
+$_use7zip = $null
 
 
 
@@ -149,92 +153,155 @@ function Get-System7ZipVersion {
 
 <#
     .DESCRIPTION
-    This `Start-7ZipBackup` function creates a full backup of
-    mods installed at Steam Workshop.
-
-    .PARAMETER SevenZipPath
-    Path to 7-Zip executable.
+    This `Start-ModsBackup` function creates backup of
+    mods installed in specified directory.
 
     .PARAMETER DestinationPath
     Path to directory where backups of mods store.
 
-    .PARAMETER WorkshopModPath
-    Path to Steam Workshop items' directory of Transport Fever.
-    This path is similar to something like 
-    `<SteamLibrary>\steamapps\workshop\content\1066780`, which is 
-    the parent of ALL mods.
+    .PARAMETER ModsPath
+    Path to `mods` of Transport Fever. There are 3 locations which
+    may be provided to this parameter. 
+    - Steam Workshop items' directory of Transport Fever, which is
+      like `<SteamLibrary>\steamapps\workshop\content\1066780`.
+    - Steam User directory of mods, which is something like
+      `C:\Program Files (x86)\Steam\userdata\<steam_id>\1066780\local\mods`.
+    - Transport Fever vanilla `mods` folder, like 
+      `<SteamLibrary>\steamapps\common\Transport Fever 2\mods`, or
+      just the `mods` folder in the same location as `TransportFever2.exe`
+
+    .PARAMETER CompressMethod
+    Decide the method to use for creating archive. 
+    Acceptable values:
+    - Buildin (Default): Use Powershell buildin `Compress-Archive`
+      function to create *.zip* archive, which is faster than 
+      using 7-Zip, while the archive is usually much larger.
+    - 7Zip: Use 7-Zip to create archive with higher compression ratio,
+      while it may be slower and lead to higher CPU and memory usage.
 #>
-function Start-7ZipBackup {
+function Start-ModsBackup {
     param (
-        # Specifies a path to one or more locations.
         [Parameter(
             Mandatory,
             Position = 0
-        )]
-        [Alias('7z')]
-        [ValidateNotNullOrEmpty()]
-        [string]
-        $SevenZipPath,
-
-        [Parameter(
-            Mandatory,
-            Position = 1
         )]
         [Alias('Destination')]
         [ValidateNotNullOrEmpty()]
         [string]
         $DestinationPath,
-
+        
         [Parameter(
             Mandatory,
-            Position = 2
+            Position = 1
         )]
-        [Alias('WorkshopMod')]
+        [Alias('Mods')]
         [ValidateNotNullOrEmpty()]
         [string]
-        $WorkshopModPath
+        $ModsPath,
+
+        [Parameter()]
+        [ValidateSet('7Zip', 'Buildin')]
+        [string]
+        $CompressMethod = 'Buildin'
     )
     
+    # Save current location to restore when finished.
     $curLocation = Get-Location
 
+    # Create destination directory if not exist.
     if ( -not (Test-Path -Path $DestinationPath)) {
         New-Item -Path $DestinationPath -ItemType Directory
     }
-    $destParent = Resolve-Path $DestinationPath
 
-    $modsParent = Resolve-Path $WorkshopModPath
-    Set-Location $modsParent
+    # Resolve the absolute path to destination directory.
+    $abDestParent = Resolve-Path $DestinationPath
 
+    # Resolve the absolute path to folder containing mods.
+    $abModsPath = Resolve-Path $ModsPath
+
+    # 7-Zip store directories in archive with the name of
+    # relative path to current working directory. To make
+    # the name conciser, changing working directory. 
+    Set-Location $abModsPath
+
+    # Get installed mods list in specified path.
     $mods = Get-ChildItem -Directory
-    $progressBarCounter = 1
-    foreach ($mod in $mods) {
-        $lastWrite = $mod.LastWriteTime
-        $destPath = Join-Path $destParent "$($mod.Name)_$("{0:yyyyMMdd-HHmmss}" -f $lastWrite).7z"
 
+    # Create list for storing mods to be backup.
+    # And some counter.
+    $modsToBackup = [System.Collections.Generic.List[PSObject]]::new()
+    $modsSkippedCounter = 0
+    $modsOverallCounter = 0
+
+    # First scan all mods, generate target backup filename,
+    # and check if backup of the same timestamp exists.
+    foreach ($mod in $mods) {
+        # Get the time of the mod's last modification.
+        $modLastWrite = $mod.LastWriteTime
+
+        # Choose extension according to compress method
+        $backupExt = if ($CompressMethod -eq '7Zip') { "7z" } elseif ($CompressMethod -eq 'Buildin') { "zip" }
+
+        # Generate backup file target filename
+        $backupFilename = Join-Path $abDestParent "$($mod.Name)_$("{0:yyyyMMdd-HHmmss}" -f $($modLastWrite)).$($backupExt)"
+
+        # Test if this backup has already been there.
+        # If not, add to list for later backup process.
+        # Otherwise, continue to next mod.
+        if (-not (Test-Path -Path $backupFilename)) {
+            $modsToBackup.Add([PSCustomObject]@{
+                    Name           = $mod.Name
+                    BackupFilename = $backupFilename
+                })
+        }
+        else {
+            $modsSkippedCounter++
+        }
+
+        $modsOverallCounter++
+    }
+
+    # Print skipping info.
+    Write-Output "Found $($modsOverallCounter) mods. Skipping $($modsSkippedCounter) for existed backup. Backing up $($modsToBackup.Count)."
+
+
+    # Do the main backup loop.
+    for ($modBackupPtr = 0; $modBackupPtr -lt $modsToBackup.Count; $modBackupPtr++) {
+        # Extract mod name and backup filename
+        $modName = $modsToBackup[$modBackupPtr].Name
+        $modBackupFilename = $modsToBackup[$modBackupPtr].BackupFilename
+
+        # Show progress
         $progress = @{
             Activity         = "Creating Backup"
-            Status           = "`($($progressBarCounter)/$($mods.Length)`)"
-            CurrentOperation = "Backup $($mod.Name) -> $(Split-Path -Path $destPath -Leaf)"
-            PercentComplete  = $($($progressBarCounter) / $($mods.Length) * 100)
+            Status           = "`($($modBackupPtr + 1)/$($modsToBackup.Count)`) $($modName) -> $(Split-Path -Path $modBackupFilename -Leaf)"
+            # CurrentOperation = "Backup $($modName) -> $(Split-Path -Path $modBackupFilename -Leaf)"
+            PercentComplete  = $($($modBackupPtr + 1) / $($modsToBackup.Count) * 100)
         }
         Write-Progress @progress
 
-        if (Test-Path $destPath) {
-            Write-Warning "There is already a backup for $($mod.Name) modified at $($lastWrite). Skipping."
-            continue
-        }
+        # Use 7Zip to create *.7z* archive
+        if ($CompressMethod -eq '7Zip') {
+            $sz = $null
+            if ($script:_use7zip -and $script:_use7zip.Available) {
+                $sz = $script:_use7zip.Path
+            }
+            else {
+                throw 'No available 7-Zip while asked to use it.'
+            }
+            $szOutput = & $sz a $modBackupFilename $modName
 
-        $szOutput = & $SevenZipPath a $destPath $($mod.Name)
-        if ($LASTEXITCODE -eq 0) {
-            # Write-Output "Backup for $($mod.Name) modified at $($lastWrite) is created."
+            if ($LASTEXITCODE -ne 0) {
+                throw "Error occured when creating backup for $($mod.Name) modified at $($lastWrite)`n7-Zip Output:`n$($szOutput)"
+            }
         }
-        else {
-            throw "Error occured when creating backup for $($mod.Name) modified at $($lastWrite)`n7-Zip Output:`n$($szOutput)"
+        # Use Powershell buildin function to create *.zip* archive
+        elseif ($CompressMethod -eq 'Buildin') {
+            Compress-Archive -Path $modName -DestinationPath $modBackupFilename -ErrorAction Stop
         }
-
-        $progressBarCounter++
     }
 
+    # Restore the working directory.
     Set-Location $curLocation
 }
 
@@ -242,40 +309,54 @@ function Start-7ZipBackup {
 
 
 
-<#
-    .DESCRIPTION
-    Main Function Block
-#>
-function Backup-TPFMods {
-    $platform = Get-Platform
-    if (-not [string]::IsNullOrWhiteSpace($script:Use7Zip)) {
-        $sevenZipVer = Get-7ZipVersion $script:Use7Zip
-        if ($sevenZipVer -and $sevenZipVer.Available) {
-            $script:_use7zip = $sevenZipVer
+# Main Process Block
+
+# Get current platform for later 7-Zip detection
+$platform = Get-Platform
+
+# Setting compress method
+switch ($PSCmdlet.ParameterSetName) {
+    # Default Parameter Set
+    'BuildinCompress' { 
+        # If `UseBuildInCompress` parameter is set, it indicates that user
+        # force to use buildin compress. Do as user want.
+        # If not set, search 7-Zip if available. Otherwise use
+        # buildin compress.
+        if ((-not $UseBuildInCompress) -and (($sevenZipVer = Get-System7ZipVersion $platform) -and $sevenZipVer.Available)) {
+            $_use7zip = $sevenZipVer
+            Write-Output "Using System 7-Zip $($sevenZipVer.Version) at $($sevenZipVer.Path)"
+        }
+        else {
+            $_use7zip = $null
+            Write-Output 'Using buildin compress.'
+        }
+    }
+
+    # Detect 7-Zip when it is given by user.
+    '7ZipCompress' {
+        if ((-not [string]::IsNullOrWhiteSpace($Use7Zip)) -and (($sevenZipVer = Get-7ZipVersion $Use7Zip) -and $sevenZipVer.Available)) {
+            $_use7zip = $sevenZipVer
             Write-Output "Using User's 7-Zip $($sevenZipVer.Version) at $($sevenZipVer.Path)"
         }
         else {
-            throw "Invalid 7-Zip $($script:Use7Zip) was given."
+            throw "Invalid 7-Zip $Use7Zip was given."
         }
     }
-    elseif (($sevenZipVer = Get-System7ZipVersion $platform) -and $sevenZipVer.Available) {
-        $script:_use7zip = $sevenZipVer
-        Write-Output "Using System 7-Zip $($sevenZipVer.Version) at $($sevenZipVer.Path)"
-    }
-    else {
-        Write-Output "No available 7-Zip"
-    }
-
-    if ($script:_use7zip) {
-        $szParam = @{
-            SevenZipPath    = $script:_use7zip.Path
-            DestinationPath = $script:BackupPath
-            WorkshopModPath = $script:ModsPath
-        }
-
-        Start-7ZipBackup @szParam 
+    Default {
+        $_use7zip = $null
     }
 }
 
-Backup-TPFMods
+# Prepare backup parameters
+$backupParam = @{
+    DestinationPath = $BackupPath
+    ModsPath        = $ModsPath
+}
 
+# Choose compress method
+$backupParam.CompressMethod = if ($_use7zip.Available) { '7Zip' } else { 'Buildin' }
+
+# Start backup
+Start-ModsBackup @backupParam
+
+Write-Output 'Finished.'
